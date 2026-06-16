@@ -306,6 +306,49 @@
           </div>
         </div>
       </div>
+
+      <div v-if="confirmDialog.visible" class="modal-overlay" @click.self="cancelConfirm">
+        <div class="modal-dialog">
+          <div class="modal-header">
+            <span class="modal-icon">{{ confirmDialog.icon }}</span>
+            <h3>{{ confirmDialog.title }}</h3>
+          </div>
+          <div class="modal-body">
+            <p>{{ confirmDialog.message }}</p>
+            <div v-if="confirmDialog.details && confirmDialog.details.length > 0" class="modal-details">
+              <h4>操作内容：</h4>
+              <ul>
+                <li v-for="(detail, idx) in confirmDialog.details" :key="idx">
+                  {{ detail }}
+                </li>
+              </ul>
+            </div>
+            <div v-if="confirmDialog.warning" class="modal-warning">
+              <span>⚠️</span>
+              <p>{{ confirmDialog.warning }}</p>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn btn-secondary" @click="cancelConfirm">
+              取消
+            </button>
+            <button 
+              class="btn" 
+              :class="confirmDialog.danger ? 'btn-danger' : 'btn-primary'"
+              @click="executeConfirm"
+              :disabled="fixing"
+            >
+              <span v-if="fixing">
+                <span class="btn-spinner"></span>
+                处理中...
+              </span>
+              <span v-else>
+                {{ confirmDialog.confirmText || '确认' }}
+              </span>
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -327,8 +370,40 @@ const filterCollection = ref('')
 const filterSeverity = ref('')
 const filterType = ref('')
 const filterFixable = ref(false)
-const selectedIssues = ref([])
+const selectedIssueIds = ref(new Set())
 const selectAll = ref(false)
+
+const confirmDialog = ref({
+  visible: false,
+  icon: '',
+  title: '',
+  message: '',
+  details: [],
+  warning: '',
+  danger: false,
+  confirmText: '',
+  onConfirm: null
+})
+
+let issueIdCounter = 0
+
+function generateStableIssueId(issue) {
+  const parts = [
+    issue.collection,
+    String(issue.itemId || `idx-${issue.index}`),
+    issue.type,
+    issue.field || ''
+  ]
+  return parts.join('|||')
+}
+
+function ensureIssueHasStableId(issue) {
+  if (!issue._stableId) {
+    issue._stableId = generateStableIssueId(issue)
+    issue._uniqueId = `issue-${++issueIdCounter}-${Date.now()}`
+  }
+  return issue._stableId
+}
 
 onMounted(() => {
   loadDataSummary()
@@ -349,11 +424,15 @@ async function loadDataSummary() {
 async function runInspection() {
   inspecting.value = true
   fixResults.value = []
-  selectedIssues.value = []
+  selectedIssueIds.value = new Set()
   selectAll.value = false
   try {
     const response = await fetch('/api/inspection')
-    lastResult.value = await response.json()
+    const result = await response.json()
+    
+    result.issues.forEach(issue => ensureIssueHasStableId(issue))
+    
+    lastResult.value = result
     resetFilters()
   } catch (error) {
     console.error('巡检失败:', error)
@@ -380,68 +459,186 @@ async function loadHistory() {
   }
 }
 
-async function fixSingle(issue) {
-  fixing.value = true
-  try {
-    const response = await fetch('/api/inspection/fix', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issues: [issue] })
-    })
-    const data = await response.json()
-    fixResults.value = data.results
-    showFixResults(data)
-    await runInspection()
-  } catch (error) {
-    console.error('修复失败:', error)
-    alert('修复失败，请稍后重试')
-  } finally {
-    fixing.value = false
+function showConfirm(options) {
+  confirmDialog.value = {
+    visible: true,
+    icon: options.icon || '❓',
+    title: options.title || '确认操作',
+    message: options.message || '确定要执行此操作吗？',
+    details: options.details || [],
+    warning: options.warning || '',
+    danger: options.danger || false,
+    confirmText: options.confirmText || '确认',
+    onConfirm: options.onConfirm
   }
+}
+
+function cancelConfirm() {
+  confirmDialog.value.visible = false
+  confirmDialog.value.onConfirm = null
+}
+
+async function executeConfirm() {
+  if (confirmDialog.value.onConfirm) {
+    try {
+      await confirmDialog.value.onConfirm()
+    } finally {
+      confirmDialog.value.visible = false
+      confirmDialog.value.onConfirm = null
+    }
+  }
+}
+
+function analyzeFixActions(issues) {
+  const actions = {
+    set_default: 0,
+    convert_type: 0,
+    regenerate_id: 0,
+    fix_date: 0,
+    delete_item: 0,
+    other: 0
+  }
+  
+  issues.forEach(issue => {
+    if (issue.suggestedFix) {
+      const action = issue.suggestedFix.action
+      if (actions[action] !== undefined) {
+        actions[action]++
+      } else {
+        actions.other++
+      }
+    }
+  })
+  
+  return actions
+}
+
+function getFixSummary(issues) {
+  const actions = analyzeFixActions(issues)
+  const details = []
+  
+  if (actions.set_default > 0) details.push(`设置默认值：${actions.set_default} 项`)
+  if (actions.convert_type > 0) details.push(`类型转换：${actions.convert_type} 项`)
+  if (actions.regenerate_id > 0) details.push(`重新生成ID：${actions.regenerate_id} 项`)
+  if (actions.fix_date > 0) details.push(`修复日期：${actions.fix_date} 项`)
+  if (actions.delete_item > 0) details.push(`删除数据：${actions.delete_item} 项`)
+  
+  return { actions, details, hasDelete: actions.delete_item > 0 }
+}
+
+async function fixSingle(issue) {
+  const summary = getFixSummary([issue])
+  const issueId = ensureIssueHasStableId(issue)
+  
+  showConfirm({
+    icon: summary.hasDelete ? '⚠️' : '🔧',
+    title: summary.hasDelete ? '危险操作确认' : '修复确认',
+    message: summary.hasDelete 
+      ? `此操作将删除「${issue.collectionDisplayName}」中的一条数据，删除后无法恢复。`
+      : `确定要修复「${issue.collectionDisplayName}」的这个问题吗？`,
+    details: [
+      `问题：${issue.message}`,
+      `建议修复：${getFixDescription(issue)}`
+    ],
+    warning: summary.hasDelete ? '删除操作不可撤销，请确认您了解后果！' : '',
+    danger: summary.hasDelete,
+    confirmText: summary.hasDelete ? '确认删除' : '确认修复',
+    onConfirm: async () => {
+      fixing.value = true
+      try {
+        const response = await fetch('/api/inspection/fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issues: [{ ...issue, _stableId: issueId }] })
+        })
+        const data = await response.json()
+        fixResults.value = data.results
+        showFixResults(data)
+        await runInspection()
+      } catch (error) {
+        console.error('修复失败:', error)
+        alert('修复失败，请稍后重试')
+      } finally {
+        fixing.value = false
+      }
+    }
+  })
 }
 
 async function fixSelected() {
-  if (selectedIssues.value.length === 0) return
-  fixing.value = true
-  try {
-    const response = await fetch('/api/inspection/fix', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ issues: selectedIssues.value })
-    })
-    const data = await response.json()
-    fixResults.value = data.results
-    showFixResults(data)
-    selectedIssues.value = []
-    selectAll.value = false
-    await runInspection()
-  } catch (error) {
-    console.error('修复失败:', error)
-    alert('修复失败，请稍后重试')
-  } finally {
-    fixing.value = false
-  }
+  const issues = getSelectedIssues()
+  if (issues.length === 0) return
+  
+  const summary = getFixSummary(issues)
+  
+  showConfirm({
+    icon: summary.hasDelete ? '⚠️' : '🔧',
+    title: summary.hasDelete ? '危险操作确认' : '批量修复确认',
+    message: `确定要修复选中的 ${issues.length} 个问题吗？`,
+    details: summary.details,
+    warning: summary.hasDelete ? '此操作包含删除操作，删除后无法恢复！' : '',
+    danger: summary.hasDelete,
+    confirmText: summary.hasDelete ? '确认修复并删除' : '确认修复',
+    onConfirm: async () => {
+      fixing.value = true
+      try {
+        const issuesWithIds = issues.map(i => ({ ...i, _stableId: ensureIssueHasStableId(i) }))
+        const response = await fetch('/api/inspection/fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ issues: issuesWithIds })
+        })
+        const data = await response.json()
+        fixResults.value = data.results
+        showFixResults(data)
+        selectedIssueIds.value = new Set()
+        selectAll.value = false
+        await runInspection()
+      } catch (error) {
+        console.error('修复失败:', error)
+        alert('修复失败，请稍后重试')
+      } finally {
+        fixing.value = false
+      }
+    }
+  })
 }
 
 async function fixAll() {
-  fixing.value = true
-  try {
-    const response = await fetch('/api/inspection/fix-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
-    })
-    const data = await response.json()
-    fixResults.value = data.results
-    showFixResults(data)
-    selectedIssues.value = []
-    selectAll.value = false
-    await runInspection()
-  } catch (error) {
-    console.error('一键修复失败:', error)
-    alert('一键修复失败，请稍后重试')
-  } finally {
-    fixing.value = false
-  }
+  if (!lastResult.value) return
+  
+  const fixableIssues = lastResult.value.issues.filter(i => i.fixable)
+  const summary = getFixSummary(fixableIssues)
+  
+  showConfirm({
+    icon: summary.hasDelete ? '⚠️' : '✨',
+    title: summary.hasDelete ? '危险操作确认' : '一键修复确认',
+    message: `确定要修复所有可修复的 ${fixableIssues.length} 个问题吗？`,
+    details: summary.details,
+    warning: summary.hasDelete ? '此操作包含删除操作，删除后无法恢复！' : '',
+    danger: summary.hasDelete,
+    confirmText: summary.hasDelete ? '确认全部修复并删除' : '确认全部修复',
+    onConfirm: async () => {
+      fixing.value = true
+      try {
+        const response = await fetch('/api/inspection/fix-all', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        const data = await response.json()
+        fixResults.value = data.results
+        showFixResults(data)
+        selectedIssueIds.value = new Set()
+        selectAll.value = false
+        await runInspection()
+      } catch (error) {
+        console.error('一键修复失败:', error)
+        alert('一键修复失败，请稍后重试')
+      } finally {
+        fixing.value = false
+      }
+    }
+  })
 }
 
 function showFixResults(data) {
@@ -480,6 +677,14 @@ const fixableIssues = computed(() => {
   return filteredIssues.value.filter(i => i.fixable)
 })
 
+function getSelectedIssues() {
+  if (!lastResult.value) return []
+  return lastResult.value.issues.filter(issue => {
+    const stableId = ensureIssueHasStableId(issue)
+    return selectedIssueIds.value.has(stableId)
+  })
+}
+
 const isIndeterminate = computed(() => {
   if (fixableIssues.value.length === 0) return false
   const selectedCount = fixableIssues.value.filter(i => isSelected(i)).length
@@ -517,34 +722,54 @@ const fixResultClass = computed(() => {
 })
 
 function getIssueKey(issue, index) {
-  return `${issue.collection}-${issue.index}-${issue.type}-${index}`
+  const stableId = ensureIssueHasStableId(issue)
+  return `${issue._uniqueId || stableId}-${index}`
 }
 
 function isSelected(issue) {
-  return selectedIssues.value.some(s => 
-    s.collection === issue.collection && 
-    s.index === issue.index && 
-    s.type === issue.type
-  )
+  const stableId = ensureIssueHasStableId(issue)
+  return selectedIssueIds.value.has(stableId)
 }
 
 function toggleIssue(issue) {
-  const key = getIssueKey(issue, 0)
-  if (isSelected(issue)) {
-    selectedIssues.value = selectedIssues.value.filter(s => 
-      !(s.collection === issue.collection && s.index === issue.index && s.type === issue.type)
-    )
+  const stableId = ensureIssueHasStableId(issue)
+  const newSet = new Set(selectedIssueIds.value)
+  
+  if (newSet.has(stableId)) {
+    newSet.delete(stableId)
   } else {
-    selectedIssues.value.push(issue)
+    newSet.add(stableId)
   }
+  
+  selectedIssueIds.value = newSet
+  updateSelectAllState()
+}
+
+function updateSelectAllState() {
+  const fixable = fixableIssues.value
+  if (fixable.length === 0) {
+    selectAll.value = false
+    return
+  }
+  
+  const selectedCount = fixable.filter(i => isSelected(i)).length
+  selectAll.value = selectedCount === fixable.length
 }
 
 function toggleSelectAll() {
-  if (selectAll.value) {
-    selectedIssues.value = [...fixableIssues.value]
+  const newSet = new Set()
+  
+  if (!selectAll.value) {
+    fixableIssues.value.forEach(issue => {
+      const stableId = ensureIssueHasStableId(issue)
+      newSet.add(stableId)
+    })
+    selectAll.value = true
   } else {
-    selectedIssues.value = []
+    selectAll.value = false
   }
+  
+  selectedIssueIds.value = newSet
 }
 
 function resetFilters() {
@@ -1262,5 +1487,163 @@ function formatTime(timestamp) {
     flex-direction: column;
     align-items: flex-start;
   }
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(220, 38, 38, 0.4);
+}
+
+.btn-danger:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(220, 38, 38, 0.6);
+}
+
+.btn-danger:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2000;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.modal-dialog {
+  background: white;
+  border-radius: 20px;
+  max-width: 500px;
+  width: calc(100% - 40px);
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.modal-header {
+  padding: 30px 30px 20px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+}
+
+.modal-icon {
+  font-size: 48px;
+  display: block;
+  margin-bottom: 15px;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+  color: #333;
+}
+
+.modal-body {
+  padding: 25px 30px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.modal-body p {
+  color: #555;
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+
+.modal-details {
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 15px 20px;
+  margin-bottom: 20px;
+}
+
+.modal-details h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #444;
+}
+
+.modal-details ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.modal-details li {
+  color: #555;
+  font-size: 14px;
+  line-height: 1.8;
+  margin-bottom: 5px;
+}
+
+.modal-details li:last-child {
+  margin-bottom: 0;
+}
+
+.modal-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 15px 20px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  border-left: 4px solid #dc2626;
+}
+
+.modal-warning span {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.modal-warning p {
+  margin: 0;
+  color: #991b1b;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 15px;
+  justify-content: flex-end;
+  padding: 20px 30px 30px;
+  border-top: 1px solid #eee;
+  background: #fafafa;
+}
+
+.modal-footer .btn {
+  min-width: 100px;
 }
 </style>

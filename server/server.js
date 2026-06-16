@@ -755,36 +755,95 @@ app.post('/api/inspection/fix-all', (req, res) => {
   }
 });
 
-function findItemIndex(items, issue) {
-  const { index, itemId, type, field } = issue;
-  const itemIdStr = String(itemId);
+function generateIssueSignature(issue) {
+  const parts = [
+    issue.collection,
+    String(issue.itemId || ''),
+    issue.type,
+    issue.field || '',
+    issue.referencedId || '',
+    issue.firstIndex !== undefined ? String(issue.firstIndex) : ''
+  ];
+  return parts.join('|||');
+}
+
+function generateItemSignature(item, collection, index) {
+  const idStr = String(item.id || `index-${index}`);
+  return {
+    base: `${collection}|||${idStr}`,
+    full: (field, type) => `${collection}|||${idStr}|||${type || ''}|||${field || ''}`
+  };
+}
+
+function matchIssueToItem(issue, item, itemIndex, collection) {
+  const { itemId, type, field, firstIndex, referencedId } = issue;
+  const itemIdStr = String(itemId || '');
   
-  if (items[index]) {
-    const item = items[index];
-    if (item.id === itemId || 
-        (itemIdStr && itemIdStr.startsWith('index-') && index === parseInt(itemIdStr.split('-')[1])) ||
-        (field && item[field] !== undefined) ||
-        type === 'duplicate_id') {
-      return index;
+  if (item.id !== undefined && itemIdStr && item.id === itemId) {
+    if (type !== 'duplicate_id') {
+      return true;
     }
+    if (type === 'duplicate_id' && itemIndex !== firstIndex) {
+      return true;
+    }
+  }
+  
+  if (itemIdStr.startsWith('index-')) {
+    const targetIndex = parseInt(itemIdStr.split('-')[1]);
+    if (itemIndex === targetIndex) {
+      return true;
+    }
+  }
+  
+  if (type === 'missing_field' && field) {
+    const hasIdMatch = item.id === itemId || 
+      (item.id === undefined && itemIdStr.startsWith('index-'));
+    if (hasIdMatch && item[field] === undefined) {
+      return true;
+    }
+  }
+  
+  if (type === 'broken_reference' && field && referencedId) {
+    if (item[field] === referencedId) {
+      return true;
+    }
+  }
+  
+  if (type === 'type_mismatch' && field) {
+    if (item.id === itemId && item[field] !== undefined) {
+      return true;
+    }
+  }
+  
+  if (type === 'invalid_id' && item.id === itemId) {
+    return true;
+  }
+  
+  if (type === 'invalid_date' && field && item.id === itemId) {
+    return true;
+  }
+  
+  return false;
+}
+
+function findItemIndex(items, issue) {
+  const { index, type, collection } = issue;
+  
+  if (items[index] && matchIssueToItem(issue, items[index], index, collection)) {
+    return index;
   }
   
   for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (item.id === itemId) {
-      return i;
-    }
-    if (type === 'duplicate_id' && item.id === issue.itemId) {
-      if (i !== issue.firstIndex) {
-        return i;
-      }
-    }
-    if (type === 'missing_field' && field && item[field] === undefined && item.id === itemId) {
+    if (matchIssueToItem(issue, items[i], i, collection)) {
       return i;
     }
   }
   
-  return index;
+  if (items[index]) {
+    return index;
+  }
+  
+  return Math.min(index, items.length - 1);
 }
 
 function applyFix(issue, allData) {

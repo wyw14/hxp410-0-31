@@ -1,6 +1,6 @@
 [
   {
-    "id": "af4e19df-5695-4462-b822-0ab1cdb4c061",
+    "id": "rep1",
     "targetType": "secrets",
     "targetId": "1",
     "reason": "内容不合适",
@@ -8,24 +8,23 @@
     "status": "待处理"
   },
   {
-    "id": "475c6381-6f55-4b8c-8958-2485c11043c7",
+    "id": "rep2",
     "targetType": "replies",
-    "targetId": "829b63e7-2e13-4842-a204-14d1b1a9cb4f",
+    "targetId": "32085d67-fa6e-4f4e-9b3e-83bfc1943ae1",
     "reason": "不当言论",
     "createdAt": "2024-01-16T14:00:00.000Z"
   },
   {
-    "id": "4a133d65-391a-4380-be67-ed9f1e8e7392",
+    "id": "rep3",
     "targetType": "invalid_type",
     "targetId": "1",
     "reason": "目标类型无效",
     "createdAt": "2024-01-17T16:00:00.000Z"
   },
   {
-    "id": "315671b8-5d25-4221-8b46-b618ab1fc417",
+    "id": "rep5",
     "targetId": "2",
     "reason": "缺少targetType字段",
-    "createdAt": "2024-01-19T20:00:00.000Z",
-    "targetType": ""
+    "createdAt": "2024-01-19T20:00:00.000Z"
   }
 ]

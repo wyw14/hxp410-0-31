@@ -1,13 +1,13 @@
 [
   {
-    "id": "00852ee3-3d44-4aba-b397-283083b33c60",
+    "id": "t1",
     "name": "校园往事",
     "description": "分享那些年在校园里的故事",
     "createdAt": "2024-01-01T00:00:00.000Z",
     "status": "active"
   },
   {
-    "id": "02c237f8-8794-4dae-b30c-f5a871ca8669",
+    "id": "t2",
     "name": "职场心声",
     "description": "工作中的那些酸甜苦辣",
     "createdAt": "2024-01-05T00:00:00.000Z"
@@ -15,14 +15,11 @@
   {
     "name": "缺少id和createdAt",
     "description": "这条记录缺少必要字段",
-    "status": "active",
-    "id": "d53b539b-2048-4f90-b0d8-bb4982e23555",
-    "createdAt": "2026-06-16T02:08:49.292Z"
+    "status": "active"
   },
   {
-    "id": "378a2cd8-2ed7-43ea-a769-60d4d2b3bd46",
+    "id": "t4",
     "name": "亲情友情",
-    "createdAt": "2024-01-10T00:00:00.000Z",
-    "description": ""
+    "createdAt": "2024-01-10T00:00:00.000Z"
   }
 ]
