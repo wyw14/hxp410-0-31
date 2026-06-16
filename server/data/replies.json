@@ -1,0 +1,37 @@
+[
+  {
+    "id": "68799c4f-9f7a-4c43-a02f-49f14a91d436",
+    "secretId": "1",
+    "content": "我也有过类似的经历，时间会治愈一切的",
+    "createdAt": "2024-01-16T08:00:00.000Z"
+  },
+  {
+    "id": "829b63e7-2e13-4842-a204-14d1b1a9cb4f",
+    "secretId": "2",
+    "content": "ID重复了，这条应该被检测到",
+    "createdAt": "2024-01-18T12:00:00.000Z"
+  },
+  {
+    "content": "缺少id和secretId字段",
+    "createdAt": "2024-01-19T14:00:00.000Z",
+    "id": "adeaaf1d-5b5b-41be-a7ee-a094265931bd"
+  },
+  {
+    "id": "d48c7b20-4eee-48bd-b0ef-e678f72776ff",
+    "secretId": "",
+    "content": "id是数字类型，应该是字符串",
+    "createdAt": "2024-01-20T16:00:00.000Z"
+  },
+  {
+    "id": "r6",
+    "secretId": "3",
+    "content": "",
+    "createdAt": "2024-01-21T18:00:00.000Z"
+  },
+  {
+    "id": "4297aefd-6221-409a-af60-0c47ed3e147a",
+    "secretId": "4",
+    "content": "ID格式无效",
+    "createdAt": "not-a-valid-date"
+  }
+]
